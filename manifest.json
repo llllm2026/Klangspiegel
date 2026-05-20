@@ -1,0 +1,16 @@
+{
+  "name": "Klangspiegel",
+  "short_name": "Klangspiegel",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "https://via.placeholder.com/192x192/000000/ffffff?text=K",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}

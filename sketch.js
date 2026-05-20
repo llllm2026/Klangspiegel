@@ -20,10 +20,10 @@ let faceIsSharpEnough = false;
 let faceDetectedBefore = false;
 
 //////////////////////////////////////////////////////
-// WORLD SYSTEM
+// KLANGWELT SYSTEM
 //////////////////////////////////////////////////////
 
-let world = null;
+let klangwelt = null;
 
 //////////////////////////////////////////////////////
 // MIRROR GRAPHICS BUFFER
@@ -50,6 +50,7 @@ let brightnessChords = [
 //////////////////////////////////////////////////////
 
 let mouthWasOpen    = false;
+let mouthWasO       = false;
 let smileWasActive  = false;
 let eyesWereClosed  = false;
 let headLeftActive  = false;
@@ -74,23 +75,24 @@ let comeCloserAlpha = 0;
 //////////////////////////////////////////////////////
 
 let audioStarted  = false;
-let lastSoundTime = 0;   // cooldown gegen Audio-Overload
+let lastSoundTime = 0;
 
 //////////////////////////////////////////////////////
-// SHARED REVERB (1x aanmaken, niet elke noot)
+// SHARED REVERB
 //////////////////////////////////////////////////////
 
 let sharedReverb = null;
 
 //////////////////////////////////////////////////////
-// WORLD COLOR PALETTES
+// KLANGWELT COLOR PALETTES
 //////////////////////////////////////////////////////
 
-const worldColors = {
-  dream:  [[120,80,220],[80,100,240],[160,60,200],[100,140,255],[200,100,255]],
-  forest: [[60,180,80],[40,140,100],[100,200,60],[30,160,120],[80,220,140]],
-  warm:   [[255,120,40],[240,60,60],[255,180,60],[220,80,100],[255,140,80]],
-  glass:  [[180,230,255],[200,200,255],[220,255,250],[255,240,255],[200,240,255]]
+const klangweltColors = {
+  himmel: [[160,210,255],[100,180,255],[180,230,255],[120,200,255],[200,240,255]],
+  erde:   [[180,120,60],[200,140,80],[160,100,50],[210,160,100],[190,130,70]],
+  feuer:  [[255,60,30],[255,100,20],[240,40,10],[255,140,40],[220,50,20]],
+  traum:  [[80,60,180],[100,80,200],[60,40,160],[120,90,220],[90,70,190]],
+  wald:   [[60,160,60],[40,130,50],[80,200,70],[50,150,80],[100,180,60]]
 };
 
 //////////////////////////////////////////////////////
@@ -138,8 +140,7 @@ function draw() {
   let faceDetected = predictions.length > 0;
 
   if (faceDetected && !faceDetectedBefore) {
-
-    createWorld();
+    createKlangwelt();
     playBrightnessChord();
   }
 
@@ -149,8 +150,7 @@ function draw() {
   // MIMIK
   //////////////////////////////////
 
-  // mimik nur alle 3 frames auswerten - spart CPU, reaktion noch schnell genug
-  if (predictions.length > 0 && faceIsSharpEnough && world && frameCount % 3 === 0) {
+  if (predictions.length > 0 && faceIsSharpEnough && klangwelt && frameCount % 3 === 0) {
 
     let face = predictions[0];
 
@@ -164,13 +164,14 @@ function draw() {
 
   //////////////////////////////////
   // COME CLOSER TEXT
+  // Nur anzeigen wenn Gesicht sichtbar aber noch nicht nah genug
+  // Verschwindet wenn kein Gesicht oder wenn nah genug
   //////////////////////////////////
 
   let comeCloserActive =
     predictions.length > 0 &&
     !faceIsSharpEnough;
 
-  // sobald come closer verschijnt: auras + tonen weg
   if (comeCloserActive && comeCloserAlpha < 0.05) {
 
     for (let i = 0; i < auras.length; i++) {
@@ -186,6 +187,7 @@ function draw() {
   if (comeCloserActive) {
     comeCloserAlpha = min(1, comeCloserAlpha + 0.015);
   } else {
+    // Fade out sowohl wenn kein Gesicht als auch wenn nah genug
     comeCloserAlpha = max(0, comeCloserAlpha - 0.025);
   }
 
@@ -197,44 +199,45 @@ function draw() {
 }
 
 //////////////////////////////////////////////////////
-// CREATE WORLD
+// CREATE KLANGWELT
 //////////////////////////////////////////////////////
 
-function createWorld() {
+function createKlangwelt() {
 
-  let palette = detectColorPalette();
+  let palette = detectKlangfarbe();
 
   let seed = floor(random(100000));
   randomSeed(seed);
 
-  world = {
-    mood:          palette.name,
-    seed:          seed,
-    scale:         random(brightnessChords),
-    oscType:       palette.osc,
-    reverbTime:    palette.reverb,
-    filterFreq:    palette.filter,
-    detune:        random(0.985, 1.015),
-    attack:        random(0.3, 1.2),
-    release:       random(3, 6),
+  klangwelt = {
+    stimmung:       palette.name,
+    seed:           seed,
+    scale:          random(brightnessChords),
+    oscType:        palette.osc,
+    reverbTime:     palette.reverb,
+    filterFreq:     palette.filter,
+    detune:         random(0.985, 1.015),
+    attack:         random(0.3, 1.2),
+    release:        palette.release,
+    arpeggioStep:   palette.arpeggioStep,
     harmonicChance: random(0.2, 0.7),
-    auraSize:      random(700, 1600)
+    auraSize:       random(700, 1600)
   };
 
-  // gedeelde reverb aanmaken voor deze world
   if (sharedReverb) {
     try { sharedReverb.disconnect(); } catch(e) {}
   }
   sharedReverb = new p5.Reverb();
 
-  console.log("WORLD:", world.mood, world.seed);
+  console.log("KLANGWELT:", klangwelt.stimmung, klangwelt.seed);
 }
 
 //////////////////////////////////////////////////////
-// COLOR DETECTION
+// KLANGFARBE DETECTION
+// 5 Klangwelten basierend auf Helligkeit und Farbdominanz
 //////////////////////////////////////////////////////
 
-function detectColorPalette() {
+function detectKlangfarbe() {
 
   video.loadPixels();
 
@@ -254,33 +257,32 @@ function detectColorPalette() {
   let g = gTotal / count;
   let b = bTotal / count;
 
-  let saturation = max(r, g, b) - min(r, g, b);
   let brightness = (r + g + b) / 3;
+  let hell       = brightness > 110;
 
-  // dominante kleur bepaalt de world
-  // lagere drempelwaarden zodat alle worlds bereikbaar zijn
+  // Klangwelt Himmel: Hell + Blau dominant
+  // Töne hell, fröhlich, langer Klang, lebendige Melodien
+  if (hell && b > r * 1.05 && b > g * 1.02)
+    return { name: "himmel", osc: "triangle", reverb: 7, filter: 1200, release: random(4, 7), arpeggioStep: 100 };
 
-  // DREAM: blauw ook subtiel detecteren
-  if (b > r * 1.05 && b > g * 1.02 && saturation > 10)
-    return { name: "dream",  osc: "triangle", reverb: 8, filter: 700  };
+  // Klangwelt Feuer: Hell + Rot dominant
+  // Töne scharf, schnelle Abfolge, blechend
+  if (hell && r > g * 1.1 && r > b * 1.1)
+    return { name: "feuer",  osc: "sawtooth", reverb: 2, filter: 2000, release: random(1, 2.5), arpeggioStep: 60  };
 
-  // FOREST: groen ook subtiel
-  if (g > r * 1.04 && g > b * 1.03 && saturation > 10)
-    return { name: "forest", osc: "triangle", reverb: 6, filter: 500  };
+  // Klangwelt Wald: Hell + Grün dominant
+  // Töne dunkler, tröpfelnd, harmonisch
+  if (hell && g > r * 1.05 && g > b * 1.05)
+    return { name: "wald",   osc: "triangle", reverb: 5, filter: 600,  release: random(2, 4),   arpeggioStep: 180 };
 
-  // GLASS: helder/neutraal licht
-  if (brightness > 160 && saturation < 30)
-    return { name: "glass",  osc: "sine",     reverb: 7, filter: 900  };
+  // Klangwelt Traum: Dunkel + Blau dominant
+  // Töne verträumt, sehr harmonisch, langer Nachhall
+  if (!hell && b > r * 1.03 && b > g * 1.01)
+    return { name: "traum",  osc: "sine",     reverb: 10, filter: 700, release: random(5, 9),   arpeggioStep: 200 };
 
-  // WARM: rood dominant — strengere eis zodat niet altijd warm
-  if (r > g * 1.15 && r > b * 1.18 && saturation > 20)
-    return { name: "warm",   osc: "sine",     reverb: 4, filter: 1400 };
-
-  // donker en neutraal → dream als default
-  if (brightness < 80)
-    return { name: "dream",  osc: "triangle", reverb: 9, filter: 600  };
-
-  return   { name: "glass",  osc: "sine",     reverb: 7, filter: 900  };
+  // Klangwelt Erde: Dunkel + Rot dominant (oder dunkel neutral)
+  // Töne tief, brummend, langsame Abfolge
+  return   { name: "erde",   osc: "sine",     reverb: 4, filter: 300,  release: random(3, 6),   arpeggioStep: 250 };
 }
 
 //////////////////////////////////////////////////////
@@ -289,13 +291,13 @@ function detectColorPalette() {
 
 function pickAuraColor() {
 
-  let palette = worldColors[world ? world.mood : "glass"] || worldColors.glass;
+  let palette = klangweltColors[klangwelt ? klangwelt.stimmung : "traum"] || klangweltColors.traum;
   let base    = random(palette);
 
   return {
-    r: constrain(base[0] + random(-25, 25), 0, 255),
-    g: constrain(base[1] + random(-25, 25), 0, 255),
-    b: constrain(base[2] + random(-25, 25), 0, 255)
+    r: constrain(base[0] + random(-20, 20), 0, 255),
+    g: constrain(base[1] + random(-20, 20), 0, 255),
+    b: constrain(base[2] + random(-20, 20), 0, 255)
   };
 }
 
@@ -305,8 +307,8 @@ function pickAuraColor() {
 
 function spawnAura(intensity) {
 
-  if (!world) return;
-  if (auras.length >= 5) auras.splice(0, 1);  // oudste verwijderen
+  if (!klangwelt) return;
+  if (auras.length >= 5) auras.splice(0, 1);
 
   let col     = pickAuraColor();
   let offsets = Array.from({length: 8}, () => random(0.6, 1.4));
@@ -314,10 +316,10 @@ function spawnAura(intensity) {
   auras.push({
     x:          random(width  * 0.15, width  * 0.85),
     y:          random(height * 0.15, height * 0.85),
-    size:       world.auraSize * random(1.4, 2.2),
+    size:       klangwelt.auraSize * random(1.4, 2.2),
     r: col.r, g: col.g, b: col.b,
     alpha:       0,
-    targetAlpha: 65 + intensity * 40,
+    targetAlpha: 55 + intensity * 30,   // etwas gedämpfter als vorher
     offsets:     offsets,
     blobSeed:    random(1000),
     noiseSeedX:  random(1000),
@@ -327,33 +329,32 @@ function spawnAura(intensity) {
 }
 
 //////////////////////////////////////////////////////
-// PLAY ONE NOTE  (gedeelde reverb, geen nieuwe objecten)
+// PLAY ONE NOTE
 //////////////////////////////////////////////////////
 
 function playNote(freq, intensity, release) {
 
-  if (!world || !sharedReverb) return;
+  if (!klangwelt || !sharedReverb) return;
 
-  // min 80ms zwischen noten — verhindert Audio-Overload auf iPad
   let now = millis();
   if (now - lastSoundTime < 80) return;
   lastSoundTime = now;
 
-  let osc    = new p5.Oscillator(world.oscType);
+  let osc    = new p5.Oscillator(klangwelt.oscType);
   let filter = new p5.LowPass();
 
-  filter.freq(world.filterFreq + random(-200, 200));
+  filter.freq(klangwelt.filterFreq + random(-200, 200));
   osc.disconnect();
   osc.connect(filter);
-  sharedReverb.process(filter, world.reverbTime * 0.5, 2);
+  sharedReverb.process(filter, klangwelt.reverbTime * 0.5, 2);
 
   osc.start();
-  osc.freq(freq * random(world.detune, world.detune + 0.015));
+  osc.freq(freq * random(klangwelt.detune, klangwelt.detune + 0.015));
   osc.amp(0);
-  osc.amp(0.08 * intensity, 0.12);  // längerer attack verhindert knacken
-  osc.amp(0, release || 1.5);
+  osc.amp(0.08 * intensity, 0.12);
+  osc.amp(0, release || klangwelt.release);
 
-  let stopTime = ((release || 1.5) + 1) * 1000;
+  let stopTime = ((release || klangwelt.release) + 1) * 1000;
 
   setTimeout(function() {
     try {
@@ -365,25 +366,25 @@ function playNote(freq, intensity, release) {
 }
 
 //////////////////////////////////////////////////////
-// PLAY WORLD CHORD
+// PLAY KLANGWELT CHORD
 //////////////////////////////////////////////////////
 
-function playWorldChord(freqs, intensity) {
+function playKlangweltChord(freqs, intensity) {
 
-  if (!world) return;
+  if (!klangwelt) return;
   intensity = intensity || 1;
 
   spawnAura(intensity);
 
   for (let i = 0; i < freqs.length; i++) {
 
-    let freq = freqs[i] * random(world.detune, world.detune + 0.02);
+    let freq = freqs[i] * random(klangwelt.detune, klangwelt.detune + 0.02);
 
-    if (random() < world.harmonicChance) {
+    if (random() < klangwelt.harmonicChance) {
       freq *= random([0.5, 1, 1.5, 2]);
     }
 
-    playNote(freq, intensity, world.release);
+    playNote(freq, intensity, klangwelt.release);
   }
 }
 
@@ -392,19 +393,20 @@ function playWorldChord(freqs, intensity) {
 //////////////////////////////////////////////////////
 
 function playBrightnessChord() {
-  playWorldChord(random(brightnessChords), 1);
+  playKlangweltChord(random(brightnessChords), 1);
 }
 
 //////////////////////////////////////////////////////
-// ARPEGGIO  (max 4 noten om overbelasting te voorkomen)
+// ARPEGGIO
 //////////////////////////////////////////////////////
 
 function playArpeggio(notes, intensity, stepMs) {
 
-  if (!world) return;
+  if (!klangwelt) return;
 
-  let step    = stepMs || 160;
-  let limited = notes.slice(0, 4);  // max 4 noten
+  // Klangwelt-spezifischer Step wenn keiner übergeben
+  let step    = stepMs || klangwelt.arpeggioStep;
+  let limited = notes.slice(0, 4);
 
   for (let i = 0; i < limited.length; i++) {
 
@@ -412,8 +414,8 @@ function playArpeggio(notes, intensity, stepMs) {
 
     (function(f, delay) {
       setTimeout(function() {
-        if (!world) return;
-        playNote(f, intensity || 1, 1.2);
+        if (!klangwelt) return;
+        playNote(f, intensity || 1, klangwelt.release * 0.7);
       }, delay);
     })(freq, i * step);
   }
@@ -422,42 +424,35 @@ function playArpeggio(notes, intensity, stepMs) {
 }
 
 //////////////////////////////////////////////////////
-// RISING / FALLING / SCATTER
+// RISING / FALLING / SCATTER / HARMONIC
 //////////////////////////////////////////////////////
 
 function playRising(baseNotes, intensity) {
 
-  // strikt aufsteigend sortiert
   let notes = [
     ...baseNotes,
     ...baseNotes.map(n => n * 2)
-  ].sort((a, b) => a - b);  // low → high
+  ].sort((a, b) => a - b);
 
-  playArpeggio(notes, intensity, 110);
+  playArpeggio(notes, intensity);
 }
 
 function playFalling(baseNotes, intensity) {
 
-  // strikt absteigend sortiert
   let notes = [
     ...baseNotes.map(n => n * 2),
     ...baseNotes
-  ].sort((a, b) => b - a);  // high → low
+  ].sort((a, b) => b - a);
 
-  playArpeggio(notes, intensity, 120);
+  playArpeggio(notes, intensity);
 }
-
-//////////////////////////////////////////////////////
-// HARMONIC VARIATION (für Kopf rechts)
-//////////////////////////////////////////////////////
 
 function playHarmonic(baseNotes, intensity) {
 
-  // Quinten und Terzen — klingt anders als rising/falling
   let notes = baseNotes.map(n => n * random([1, 1.25, 1.5, 0.75]));
-  notes = notes.sort(() => random() - 0.5);  // leicht zufällig
+  notes = notes.sort(() => random() - 0.5);
 
-  playArpeggio(notes, intensity, 150);
+  playArpeggio(notes, intensity);
 }
 
 function playScatter(baseNotes, intensity) {
@@ -473,29 +468,58 @@ function playScatter(baseNotes, intensity) {
     picked.push(random(pool));
   }
 
-  playArpeggio(picked, intensity, 90);
+  playArpeggio(picked, intensity);
 }
 
 //////////////////////////////////////////////////////
-// MOUTH
+// O-MUND SEQUENZ (neue Akkordsequenz)
+//////////////////////////////////////////////////////
+
+function playOSequenz(baseNotes, intensity) {
+
+  // Runde, volle Akkorde — passend zu O-Form
+  let notes = [
+    baseNotes[0],
+    baseNotes[0] * 1.5,
+    baseNotes[1] || baseNotes[0] * 2,
+    (baseNotes[1] || baseNotes[0] * 2) * 1.5
+  ];
+
+  playArpeggio(notes, intensity);
+}
+
+//////////////////////////////////////////////////////
+// MOUTH (Mund offen = O-Form oder weit offen)
 //////////////////////////////////////////////////////
 
 function detectMouth(face) {
 
-  let upperLip = face.scaledMesh[13];
-  let lowerLip = face.scaledMesh[14];
+  let upperLip  = face.scaledMesh[13];
+  let lowerLip  = face.scaledMesh[14];
+  let leftMouth = face.scaledMesh[61];
+  let rightMouth= face.scaledMesh[291];
 
-  let d = dist(upperLip[0], upperLip[1], lowerLip[0], lowerLip[1]);
-  let mouthOpen = d > 15;
+  let openDist  = dist(upperLip[0], upperLip[1], lowerLip[0], lowerLip[1]);
+  let mouthWidth= dist(leftMouth[0], leftMouth[1], rightMouth[0], rightMouth[1]);
 
-  if (mouthOpen && !mouthWasOpen) {
-    playScatter(world.scale, 1.3);
+  // O-Form: mund offen aber schmal (Breite/Höhe-Verhältnis)
+  let isO       = openDist > 12 && mouthWidth < openDist * 2.2;
+  // Weit offen: sehr großes Öffnen
+  let mouthOpen = openDist > 20;
+
+  if (isO && !mouthWasO) {
+    playOSequenz(klangwelt.scale, 1.2);
+  }
+
+  if (mouthOpen && !mouthWasOpen && !isO) {
+    playScatter(klangwelt.scale, 1.3);
   }
 
   if (mouthOpen && frameCount % 90 === 0) {
-    playNote(random(world.scale) * random([1, 2]), 0.6, 1.0);
+    playNote(random(klangwelt.scale) * random([1, 2]), 0.6, 1.0);
   }
 
+  mouthWasO    = isO;
   mouthWasOpen = mouthOpen;
 }
 
@@ -512,14 +536,14 @@ function detectSmile(face) {
   let smiling = w > 80;
 
   if (smiling && !smileWasActive) {
-    playRising(world.scale, 1.1);  // aufsteigendes Arpeggio
+    playRising(klangwelt.scale, 1.1);
   }
 
   smileWasActive = smiling;
 }
 
 //////////////////////////////////////////////////////
-// EYES CLOSED
+// EYES CLOSED — sensitiver: kleinere Schwelle
 //////////////////////////////////////////////////////
 
 function detectEyesClosed(face) {
@@ -532,17 +556,18 @@ function detectEyesClosed(face) {
   let leftEyeOpen  = dist(leftTop[0],  leftTop[1],  leftBottom[0],  leftBottom[1]);
   let rightEyeOpen = dist(rightTop[0], rightTop[1], rightBottom[0], rightBottom[1]);
 
-  let eyesClosed = leftEyeOpen < 10 && rightEyeOpen < 10;
+  // Schwelle von 10 auf 14 erhöht → sensitiver
+  let eyesClosed = leftEyeOpen < 14 && rightEyeOpen < 14;
 
   if (eyesClosed && !eyesWereClosed) {
-    playFalling(world.scale, 1.2);
+    playFalling(klangwelt.scale, 1.2);
   }
 
   eyesWereClosed = eyesClosed;
 }
 
 //////////////////////////////////////////////////////
-// HEAD TILT
+// HEAD TILT — Links und Rechts mit eigenen Sequenzen
 //////////////////////////////////////////////////////
 
 function detectHeadTilt(face) {
@@ -551,16 +576,18 @@ function detectHeadTilt(face) {
   let rightEye = face.scaledMesh[263];
   let eyeDiff  = leftEye[1] - rightEye[1];
 
+  // Kopf nach rechts geneigt
   let tiltedRight = eyeDiff > 15;
   if (tiltedRight && !headRightActive) {
-    playHarmonic(world.scale, 1.0);  // harmonische Variation
+    playHarmonic(klangwelt.scale, 1.0);
     spawnAura(0.8);
   }
   headRightActive = tiltedRight;
 
+  // Kopf nach links geneigt
   let tiltedLeft = eyeDiff < -15;
   if (tiltedLeft && !headLeftActive) {
-    playFalling(world.scale, 1.1);  // absteigendes Arpeggio
+    playRising(klangwelt.scale, 1.1);
     spawnAura(0.8);
   }
   headLeftActive = tiltedLeft;
@@ -579,7 +606,7 @@ function detectFrown(face) {
   let frowning     = browDistance < 180;
 
   if (frowning && !frownActive) {
-    playScatter(world.scale.map(n => n * 0.5), 1.2);
+    playScatter(klangwelt.scale.map(n => n * 0.5), 1.2);
   }
 
   frownActive = frowning;
@@ -598,7 +625,7 @@ function detectLookingUp(face) {
   let lookingUp        = verticalDistance < 140;
 
   if (lookingUp && !lookingUpActive) {
-    playRising(world.scale.map(n => n * 1.5), 1.0);
+    playRising(klangwelt.scale.map(n => n * 1.5), 1.0);
   }
 
   lookingUpActive = lookingUp;
@@ -707,7 +734,7 @@ function drawGlassText(alpha) {
 }
 
 //////////////////////////////////////////////////////
-// AURAS
+// AURAS — schnelleres Verschwinden
 //////////////////////////////////////////////////////
 
 function drawAuras() {
@@ -718,15 +745,14 @@ function drawAuras() {
 
     let a = auras[i];
 
-    // fade in / out
+    // Fade in / out — schneller als vorher (0.975 statt 0.988)
     if (a.alpha < a.targetAlpha) {
       a.alpha = min(a.targetAlpha, a.alpha + 1.5);
     } else {
-      a.alpha       *= 0.988;
-      a.targetAlpha *= 0.988;
+      a.alpha       *= 0.975;
+      a.targetAlpha *= 0.975;
     }
 
-    // vereenvoudigd: 6 lagen i.p.v. 10, 4 blobs i.p.v. 6
     let layers = 6;
 
     for (let l = layers; l >= 1; l--) {
@@ -764,12 +790,10 @@ function drawAuras() {
         pop();
       }
 
-      // zachte kern
       fill(a.r, a.g, a.b, layerAlpha * 1.4);
       ellipse(a.x, a.y, layerSize * 0.6);
     }
 
-    // drift
     let t      = frameCount * 0.0004;
     let driftX = (noise(a.noiseSeedX, t)       - 0.5) * 1.2;
     let driftY = (noise(a.noiseSeedY, t + 100) - 0.5) * 1.2;
@@ -781,7 +805,8 @@ function drawAuras() {
     a.x = ((a.x % width)  + width)  % width;
     a.y = ((a.y % height) + height) % height;
 
-    if (a.alpha < 0.8) auras.splice(i, 1);
+    // Schneller entfernen: Schwelle von 0.8 auf 2
+    if (a.alpha < 2) auras.splice(i, 1);
   }
 }
 
@@ -798,9 +823,8 @@ function drawDebug() {
   text("FACES: " + predictions.length, 20, 40);
   text("BLUR: "  + floor(blurAmount),  20, 70);
 
-  if (world) {
-    text("WORLD: " + world.mood, 20, 100);
-    // SEED wird nicht angezeigt
+  if (klangwelt) {
+    text("KLANGWELT: " + klangwelt.stimmung, 20, 100);
   }
 }
 

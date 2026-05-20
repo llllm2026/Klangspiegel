@@ -1,4 +1,3 @@
-```javascript
 //////////////////////////////////////////////////////
 // VIDEO / FACEMESH
 //////////////////////////////////////////////////////
@@ -8,10 +7,17 @@ let facemesh;
 let predictions = [];
 
 //////////////////////////////////////////////////////
+// PERFORMANCE / IPAD FIXES
+//////////////////////////////////////////////////////
+
+pixelDensity(1);
+
+//////////////////////////////////////////////////////
 // BLUR SYSTEM
 //////////////////////////////////////////////////////
 
 let blurAmount        = 20;
+let targetBlur        = 20;
 let faceIsSharpEnough = false;
 
 //////////////////////////////////////////////////////
@@ -31,6 +37,13 @@ let klangwelt = null;
 //////////////////////////////////////////////////////
 
 let mirrorPG = null;
+
+//////////////////////////////////////////////////////
+// AUDIO LIMITER
+//////////////////////////////////////////////////////
+
+let activeOscillators = 0;
+let MAX_OSCILLATORS   = 8;
 
 //////////////////////////////////////////////////////
 // CHORDS
@@ -89,11 +102,46 @@ let sharedReverb = null;
 //////////////////////////////////////////////////////
 
 const klangweltColors = {
-  himmel: [[160,210,255],[100,180,255],[180,230,255],[120,200,255],[200,240,255]],
-  erde:   [[180,120,60],[200,140,80],[160,100,50],[210,160,100],[190,130,70]],
-  feuer:  [[255,60,30],[255,100,20],[240,40,10],[255,140,40],[220,50,20]],
-  traum:  [[80,60,180],[100,80,200],[60,40,160],[120,90,220],[90,70,190]],
-  wald:   [[60,160,60],[40,130,50],[80,200,70],[50,150,80],[100,180,60]]
+
+  himmel: [
+    [180,220,255],
+    [120,190,255],
+    [200,235,255],
+    [150,210,255],
+    [170,225,255]
+  ],
+
+  erde: [
+    [170,110,70],
+    [140,90,60],
+    [200,140,90],
+    [160,100,70],
+    [180,130,90]
+  ],
+
+  feuer: [
+    [255,80,40],
+    [255,120,30],
+    [255,60,20],
+    [255,140,50],
+    [240,70,30]
+  ],
+
+  traum: [
+    [90,70,200],
+    [110,90,220],
+    [70,50,180],
+    [130,100,230],
+    [100,80,210]
+  ],
+
+  wald: [
+    [70,170,80],
+    [50,140,70],
+    [90,200,90],
+    [60,160,80],
+    [100,190,90]
+  ]
 };
 
 //////////////////////////////////////////////////////
@@ -104,15 +152,28 @@ function setup() {
 
   createCanvas(windowWidth, windowHeight);
 
-  video = createCapture(VIDEO);
+  video = createCapture({
+    video: {
+      facingMode: "user"
+    },
+    audio: false
+  });
+
   video.size(640, 480);
   video.hide();
 
   facemesh = ml5.facemesh(video, modelReady);
+
   facemesh.on("predict", function(results) {
     predictions = results;
   });
+
+  noStroke();
 }
+
+//////////////////////////////////////////////////////
+// MODEL READY
+//////////////////////////////////////////////////////
 
 function modelReady() {
   console.log("FaceMesh ready");
@@ -132,14 +193,28 @@ function draw() {
 
   let faceDetected = predictions.length > 0;
 
+  //////////////////////////////////////////////////////
+  // FACE ENTER
+  //////////////////////////////////////////////////////
+
   if (faceDetected && !faceDetectedBefore) {
+
     createKlangwelt();
     playBrightnessChord();
   }
 
   faceDetectedBefore = faceDetected;
 
-  if (predictions.length > 0 && faceIsSharpEnough && klangwelt && frameCount % 3 === 0) {
+  //////////////////////////////////////////////////////
+  // MIMIK
+  //////////////////////////////////////////////////////
+
+  if (
+    predictions.length > 0 &&
+    faceIsSharpEnough &&
+    klangwelt &&
+    frameCount % 4 === 0
+  ) {
 
     let face = predictions[0];
 
@@ -151,17 +226,21 @@ function draw() {
     detectLookingUp(face);
   }
 
+  //////////////////////////////////////////////////////
+  // COME CLOSER
+  //////////////////////////////////////////////////////
+
   let comeCloserActive =
     predictions.length > 0 &&
     !faceIsSharpEnough;
 
   if (comeCloserActive) {
-    comeCloserAlpha = min(1, comeCloserAlpha + 0.015);
+    comeCloserAlpha = min(1, comeCloserAlpha + 0.02);
   } else {
-    comeCloserAlpha = max(0, comeCloserAlpha - 0.025);
+    comeCloserAlpha = max(0, comeCloserAlpha - 0.03);
   }
 
-  if (comeCloserAlpha > 0) {
+  if (comeCloserAlpha > 0.01) {
     drawGlassText(comeCloserAlpha);
   }
 
@@ -176,26 +255,29 @@ function createKlangwelt() {
 
   let palette = detectKlangfarbe();
 
-  let seed = floor(random(100000));
-  randomSeed(seed);
-
   klangwelt = {
+
     stimmung:       palette.name,
-    seed:           seed,
     scale:          random(brightnessChords),
+
     oscType:        palette.osc,
     reverbTime:     palette.reverb,
     filterFreq:     palette.filter,
-    detune:         random(0.985, 1.015),
-    attack:         random(0.3, 1.2),
+
+    detune:         random(0.99, 1.01),
+
     release:        palette.release,
     arpeggioStep:   palette.arpeggioStep,
-    harmonicChance: random(0.2, 0.7),
-    auraSize:       random(700, 1600)
+
+    harmonicChance: random(0.2, 0.6),
+
+    auraSize:       random(600, 1200)
   };
 
   if (sharedReverb) {
-    try { sharedReverb.disconnect(); } catch(e) {}
+    try {
+      sharedReverb.disconnect();
+    } catch(e) {}
   }
 
   sharedReverb = new p5.Reverb();
@@ -209,14 +291,21 @@ function detectKlangfarbe() {
 
   video.loadPixels();
 
-  let rTotal = 0, gTotal = 0, bTotal = 0, count = 0;
+  let rTotal = 0;
+  let gTotal = 0;
+  let bTotal = 0;
+  let count  = 0;
 
-  for (let y = 120; y < 360; y += 12) {
-    for (let x = 160; x < 480; x += 12) {
+  for (let y = 120; y < 360; y += 14) {
+
+    for (let x = 160; x < 480; x += 14) {
+
       let index = (x + y * video.width) * 4;
+
       rTotal += video.pixels[index];
       gTotal += video.pixels[index + 1];
       bTotal += video.pixels[index + 2];
+
       count++;
     }
   }
@@ -226,58 +315,127 @@ function detectKlangfarbe() {
   let b = bTotal / count;
 
   let brightness = (r + g + b) / 3;
+
   let hell = brightness > 110;
 
-  if (hell && b > r * 1.05 && b > g * 1.02)
-    return { name: "himmel", osc: "triangle", reverb: 7, filter: 1200, release: random(4, 7), arpeggioStep: 100 };
+  if (hell && b > r * 1.05 && b > g * 1.02) {
+    return {
+      name: "himmel",
+      osc: "triangle",
+      reverb: 5,
+      filter: 1200,
+      release: random(3, 5),
+      arpeggioStep: 100
+    };
+  }
 
-  if (hell && r > g * 1.1 && r > b * 1.1)
-    return { name: "feuer", osc: "sawtooth", reverb: 2, filter: 2000, release: random(1, 2.5), arpeggioStep: 60 };
+  if (hell && r > g * 1.1 && r > b * 1.1) {
+    return {
+      name: "feuer",
+      osc: "sawtooth",
+      reverb: 2,
+      filter: 1800,
+      release: random(1, 2),
+      arpeggioStep: 60
+    };
+  }
 
-  if (hell && g > r * 1.05 && g > b * 1.05)
-    return { name: "wald", osc: "triangle", reverb: 5, filter: 600, release: random(2, 4), arpeggioStep: 180 };
+  if (hell && g > r * 1.05 && g > b * 1.05) {
+    return {
+      name: "wald",
+      osc: "triangle",
+      reverb: 4,
+      filter: 700,
+      release: random(2, 4),
+      arpeggioStep: 160
+    };
+  }
 
-  if (!hell && b > r * 1.03 && b > g * 1.01)
-    return { name: "traum", osc: "sine", reverb: 10, filter: 700, release: random(5, 9), arpeggioStep: 200 };
-
-  return { name: "erde", osc: "sine", reverb: 4, filter: 300, release: random(3, 6), arpeggioStep: 250 };
-}
-
-function pickAuraColor() {
-
-  let palette = klangweltColors[klangwelt ? klangwelt.stimmung : "traum"] || klangweltColors.traum;
-  let base = random(palette);
+  if (!hell && b > r * 1.03 && b > g * 1.01) {
+    return {
+      name: "traum",
+      osc: "sine",
+      reverb: 6,
+      filter: 700,
+      release: random(4, 7),
+      arpeggioStep: 180
+    };
+  }
 
   return {
-    r: constrain(base[0] + random(-20, 20), 0, 255),
-    g: constrain(base[1] + random(-20, 20), 0, 255),
-    b: constrain(base[2] + random(-20, 20), 0, 255)
+    name: "erde",
+    osc: "sine",
+    reverb: 3,
+    filter: 350,
+    release: random(2, 5),
+    arpeggioStep: 220
   };
 }
 
-function spawnAura(intensity) {
+//////////////////////////////////////////////////////
+// PICK AURA COLOR
+//////////////////////////////////////////////////////
+
+function pickAuraColor() {
+
+  let palette =
+    klangweltColors[
+      klangwelt ? klangwelt.stimmung : "traum"
+    ];
+
+  let base = random(palette);
+
+  return {
+
+    r: constrain(base[0] + random(-15, 15), 0, 255),
+    g: constrain(base[1] + random(-15, 15), 0, 255),
+    b: constrain(base[2] + random(-15, 15), 0, 255)
+  };
+}
+
+//////////////////////////////////////////////////////
+// SPAWN AURA
+//////////////////////////////////////////////////////
+
+function spawnAura(intensity = 1) {
 
   if (!klangwelt) return;
 
-  if (auras.length >= 5) auras.splice(0, 1);
+  if (auras.length >= 4) {
+    auras.splice(0, 1);
+  }
 
   let col = pickAuraColor();
-  let offsets = Array.from({length: 8}, () => random(0.6, 1.4));
+
+  let offsets =
+    Array.from(
+      { length: 8 },
+      () => random(0.7, 1.3)
+    );
 
   auras.push({
-    x: random(width * 0.15, width * 0.85),
-    y: random(height * 0.15, height * 0.85),
-    size: klangwelt.auraSize * random(1.4, 2.2),
+
+    x: random(width * 0.2, width * 0.8),
+    y: random(height * 0.2, height * 0.8),
+
+    size:
+      klangwelt.auraSize *
+      random(1.2, 1.8),
+
     r: col.r,
     g: col.g,
     b: col.b,
+
     alpha: 0,
-    targetAlpha: 140 + intensity * 60,
+    targetAlpha: 160 + intensity * 60,
+
     offsets: offsets,
+
     blobSeed: random(1000),
+
     noiseSeedX: random(1000),
     noiseSeedY: random(1000),
+
     phase: random(TWO_PI)
   });
 }
-```

@@ -32,18 +32,36 @@ let world = null;
 let mirrorPG = null;
 
 //////////////////////////////////////////////////////
-// CHORDS
+// CHORDS — 5 Skalen passend zu den Welten
 //////////////////////////////////////////////////////
 
-let brightnessChords = [
-  [130.81, 155.56, 196.00],
-  [146.83, 174.61, 220.00],
-  [164.81, 196.00, 246.94],
-  [174.61, 220.00, 261.63],
-  [196.00, 246.94, 293.66],
-  [220.00, 261.63, 329.63],
-  [261.63, 329.63, 392.00]
-];
+const scales = {
+
+  himmel: [
+    [261.63, 329.63, 392.00, 493.88, 523.25],  // C dur hell
+    [293.66, 369.99, 440.00, 554.37, 587.33]
+  ],
+
+  erde: [
+    [65.41,  82.41,  98.00,  110.00, 130.81],   // sehr tief
+    [73.42,  92.50,  110.00, 123.47, 146.83]
+  ],
+
+  feuer: [
+    [220.00, 261.63, 329.63, 415.30, 493.88],   // pentatonisch scharf
+    [246.94, 293.66, 369.99, 440.00, 554.37]
+  ],
+
+  traum: [
+    [130.81, 155.56, 185.00, 220.00, 261.63],   // moll, dunkel
+    [110.00, 130.81, 155.56, 196.00, 220.00]
+  ],
+
+  wald: [
+    [164.81, 196.00, 220.00, 261.63, 293.66],   // dorisch, rund
+    [146.83, 174.61, 207.65, 246.94, 293.66]
+  ]
+};
 
 //////////////////////////////////////////////////////
 // STATES
@@ -58,13 +76,13 @@ let frownActive     = false;
 let lookingUpActive = false;
 
 //////////////////////////////////////////////////////
-// AURAS
+// AURAS — einfache radiale schwaden
 //////////////////////////////////////////////////////
 
 let auras = [];
 
 //////////////////////////////////////////////////////
-// COME CLOSER FADE
+// COME CLOSER
 //////////////////////////////////////////////////////
 
 let comeCloserAlpha = 0;
@@ -76,23 +94,19 @@ let comeCloserAlpha = 0;
 let audioStarted   = false;
 let lastSoundTime  = 0;
 let activeOscCount = 0;
-let MAX_OSC        = 4;   // max gleichzeitige oscillatoren
-
-//////////////////////////////////////////////////////
-// SHARED REVERB (1x aanmaken, niet elke noot)
-//////////////////////////////////////////////////////
-
-let sharedReverb = null;
+let MAX_OSC        = 5;
+let sharedReverb   = null;
 
 //////////////////////////////////////////////////////
 // WORLD COLOR PALETTES
 //////////////////////////////////////////////////////
 
 const worldColors = {
-  dream:  [[120,80,220],[80,100,240],[160,60,200],[100,140,255],[200,100,255]],
-  forest: [[60,180,80],[40,140,100],[100,200,60],[30,160,120],[80,220,140]],
-  warm:   [[255,120,40],[240,60,60],[255,180,60],[220,80,100],[255,140,80]],
-  glass:  [[180,230,255],[200,200,255],[220,255,250],[255,240,255],[200,240,255]]
+  himmel: [[100,160,255],[80,140,240],[120,180,255],[60,120,220],[140,200,255]],
+  erde:   [[120,60,30],[100,40,20],[150,80,40],[80,30,10],[130,70,35]],
+  feuer:  [[255,80,20],[240,120,10],[255,60,40],[220,100,30],[255,140,60]],
+  traum:  [[80,40,180],[60,20,160],[100,60,200],[40,20,140],[120,80,220]],
+  wald:   [[40,120,60],[30,100,50],[60,150,70],[20,80,40],[50,130,65]]
 };
 
 //////////////////////////////////////////////////////
@@ -140,7 +154,6 @@ function draw() {
   let faceDetected = predictions.length > 0;
 
   if (faceDetected && !faceDetectedBefore) {
-
     createWorld();
     playBrightnessChord();
   }
@@ -148,10 +161,9 @@ function draw() {
   faceDetectedBefore = faceDetected;
 
   //////////////////////////////////
-  // MIMIK
+  // MIMIK — alle 3 frames
   //////////////////////////////////
 
-  // mimik nur alle 3 frames auswerten - spart CPU, reaktion noch schnell genug
   if (predictions.length > 0 && faceIsSharpEnough && world && frameCount % 3 === 0) {
 
     let face = predictions[0];
@@ -165,24 +177,19 @@ function draw() {
   }
 
   //////////////////////////////////
-  // COME CLOSER TEXT
+  // COME CLOSER
   //////////////////////////////////
 
   let comeCloserActive =
     predictions.length > 0 &&
     !faceIsSharpEnough;
 
-  // sobald come closer verschijnt: auras + tonen weg
   if (comeCloserActive && comeCloserAlpha < 0.05) {
-
     for (let i = 0; i < auras.length; i++) {
       auras[i].targetAlpha = 0;
     }
-
     getAudioContext().suspend();
-    setTimeout(function() {
-      getAudioContext().resume();
-    }, 150);
+    setTimeout(function() { getAudioContext().resume(); }, 150);
   }
 
   if (comeCloserActive) {
@@ -191,9 +198,7 @@ function draw() {
     comeCloserAlpha = max(0, comeCloserAlpha - 0.025);
   }
 
-  if (comeCloserAlpha > 0) {
-    drawGlassText(comeCloserAlpha);
-  }
+  if (comeCloserAlpha > 0) drawGlassText(comeCloserAlpha);
 
   drawDebug();
 }
@@ -205,71 +210,83 @@ function draw() {
 function createWorld() {
 
   let palette = detectColorPalette();
-
-  let seed = floor(random(100000));
+  let seed    = floor(random(100000));
   randomSeed(seed);
 
-  // jede world hat jetzt klar unterschiedliche klangparameter
-  let worldParams = {
+  //////////////////////////////////
+  // klangparameter pro welt
+  //////////////////////////////////
 
-    dream: {
-      oscType:       "triangle",
-      attack:        random(1.2, 2.5),   // sehr langsam, traumhaft
-      release:       random(6, 10),
-      harmonicChance: random(0.6, 0.9),  // viele harmonische sprünge
-      filterFreq:    palette.filter,
-      reverbTime:    palette.reverb,
-      detune:        random(0.992, 1.008)
+  let params = {
+
+    himmel: {
+      osc:     "triangle",
+      attack:  random(0.3, 0.8),
+      release: random(3, 5),
+      reverb:  5,
+      filter:  2000,
+      harmonic: 0.3,
+      step:    110   // schnell, lebhaft
     },
 
-    forest: {
-      oscType:       "triangle",
-      attack:        random(0.6, 1.4),   // mittel, organisch
-      release:       random(4, 7),
-      harmonicChance: random(0.3, 0.6),
-      filterFreq:    palette.filter,
-      reverbTime:    palette.reverb,
-      detune:        random(0.988, 1.012)
+    erde: {
+      osc:     "sine",
+      attack:  random(1.5, 3.0),  // sehr langsam
+      release: random(6, 10),
+      reverb:  6,
+      filter:  300,               // sehr tief gefiltert
+      harmonic: 0.2,
+      step:    320                // langsam
     },
 
-    warm: {
-      oscType:       "sine",
-      attack:        random(0.2, 0.6),   // schnell, direkt
-      release:       random(2, 4),
-      harmonicChance: random(0.1, 0.3),  // wenig sprünge, melodischer
-      filterFreq:    palette.filter,
-      reverbTime:    palette.reverb,
-      detune:        random(0.995, 1.005)
+    feuer: {
+      osc:     "triangle",        // warm aber lebendig
+      attack:  random(0.05, 0.2), // sehr schnell
+      release: random(1, 2.5),
+      reverb:  2,
+      filter:  3000,
+      harmonic: 0.15,
+      step:    70                 // sehr schnell
     },
 
-    glass: {
-      oscType:       "sine",
-      attack:        random(0.8, 1.8),   // lang, kristallin
-      release:       random(5, 9),
-      harmonicChance: random(0.4, 0.7),
-      filterFreq:    palette.filter,
-      reverbTime:    palette.reverb,
-      detune:        random(0.990, 1.010)
+    traum: {
+      osc:     "sine",
+      attack:  random(2.0, 4.0),  // sehr langsam, schwebend
+      release: random(8, 14),     // langer nachhall
+      reverb:  12,
+      filter:  600,
+      harmonic: 0.7,              // viele harmonische
+      step:    260
+    },
+
+    wald: {
+      osc:     "triangle",
+      attack:  random(0.4, 1.0),
+      release: random(3, 6),
+      reverb:  7,
+      filter:  800,
+      harmonic: 0.45,
+      step:    180               // tröpfelnd
     }
   };
 
-  let wp = worldParams[palette.name] || worldParams.glass;
+  let p = params[palette.name] || params.traum;
 
   world = {
     mood:           palette.name,
     seed:           seed,
-    scale:          random(brightnessChords),
-    oscType:        wp.oscType,
-    reverbTime:     wp.reverbTime,
-    filterFreq:     wp.filterFreq,
-    detune:         wp.detune,
-    attack:         wp.attack,
-    release:        wp.release,
-    harmonicChance: wp.harmonicChance,
-    auraSize:       random(700, 1600)
+    scale:          random(scales[palette.name] || scales.traum),
+    oscType:        p.osc,
+    reverbTime:     p.reverb,
+    filterFreq:     p.filter,
+    detune:         random(0.993, 1.007),
+    attack:         p.attack,
+    release:        p.release,
+    harmonicChance: p.harmonic,
+    step:           p.step,
+    auraSize:       random(800, 1800)
   };
 
-  // gedeelde reverb aanmaken voor deze world
   if (sharedReverb) {
     try { sharedReverb.disconnect(); } catch(e) {}
   }
@@ -279,56 +296,62 @@ function createWorld() {
 }
 
 //////////////////////////////////////////////////////
-// COLOR DETECTION
+// COLOR DETECTION — 5 Welten
 //////////////////////////////////////////////////////
 
 function detectColorPalette() {
 
   video.loadPixels();
 
-  let rTotal = 0, gTotal = 0, bTotal = 0, count = 0;
+  let rT = 0, gT = 0, bT = 0, count = 0;
 
   for (let y = 120; y < 360; y += 12) {
     for (let x = 160; x < 480; x += 12) {
-      let index = (x + y * video.width) * 4;
-      rTotal += video.pixels[index];
-      gTotal += video.pixels[index + 1];
-      bTotal += video.pixels[index + 2];
+      let idx = (x + y * video.width) * 4;
+      rT += video.pixels[idx];
+      gT += video.pixels[idx + 1];
+      bT += video.pixels[idx + 2];
       count++;
     }
   }
 
-  let r = rTotal / count;
-  let g = gTotal / count;
-  let b = bTotal / count;
+  let r   = rT / count;
+  let g   = gT / count;
+  let b   = bT / count;
+  let br  = (r + g + b) / 3;       // helligkeit
+  let sat = max(r,g,b) - min(r,g,b); // sättigung
 
-  let saturation = max(r, g, b) - min(r, g, b);
-  let brightness = (r + g + b) / 3;
+  // dominante farbe bestimmt die welt
+  // helligkeit als zweite dimension
 
-  // dominante kleur bepaalt de world
-  // lagere drempelwaarden zodat alle worlds bereikbaar zijn
+  let rDom = r / (g + b + 1);   // wie stark dominiert rot
+  let gDom = g / (r + b + 1);   // wie stark dominiert grün
+  let bDom = b / (r + g + 1);   // wie stark dominiert blau
 
-  // DREAM: blauw ook subtiel detecteren
-  if (b > r * 1.05 && b > g * 1.02 && saturation > 10)
-    return { name: "dream",  osc: "triangle", reverb: 8, filter: 700  };
+  // WALD: grün klar dominant
+  if (gDom > 0.42 && g > r && g > b)
+    return { name: "wald" };
 
-  // FOREST: groen ook subtiel
-  if (g > r * 1.04 && g > b * 1.03 && saturation > 10)
-    return { name: "forest", osc: "triangle", reverb: 6, filter: 500  };
+  // HIMMEL: blau dominant + hell
+  if (bDom > 0.40 && br > 100)
+    return { name: "himmel" };
 
-  // GLASS: helder/neutraal licht
-  if (brightness > 160 && saturation < 30)
-    return { name: "glass",  osc: "sine",     reverb: 7, filter: 900  };
+  // TRAUM: blau dominant + dunkel
+  if (bDom > 0.38 && br <= 100)
+    return { name: "traum" };
 
-  // WARM: rood dominant — strengere eis zodat niet altijd warm
-  if (r > g * 1.15 && r > b * 1.18 && saturation > 20)
-    return { name: "warm",   osc: "sine",     reverb: 4, filter: 1400 };
+  // FEUER: rot dominant + hell
+  if (rDom > 0.42 && br > 110)
+    return { name: "feuer" };
 
-  // donker en neutraal → dream als default
-  if (brightness < 80)
-    return { name: "dream",  osc: "triangle", reverb: 9, filter: 600  };
+  // ERDE: rot dominant + dunkel
+  if (rDom > 0.40 && br <= 110)
+    return { name: "erde" };
 
-  return   { name: "glass",  osc: "sine",     reverb: 7, filter: 900  };
+  // fallback nach helligkeit
+  if (br > 140) return { name: "himmel" };
+  if (br > 80)  return { name: "wald" };
+  return { name: "traum" };
 }
 
 //////////////////////////////////////////////////////
@@ -337,56 +360,52 @@ function detectColorPalette() {
 
 function pickAuraColor() {
 
-  let palette = worldColors[world ? world.mood : "glass"] || worldColors.glass;
+  let palette = worldColors[world ? world.mood : "traum"] || worldColors.traum;
   let base    = random(palette);
 
   return {
-    r: constrain(base[0] + random(-25, 25), 0, 255),
-    g: constrain(base[1] + random(-25, 25), 0, 255),
-    b: constrain(base[2] + random(-25, 25), 0, 255)
+    r: constrain(base[0] + random(-20, 20), 0, 255),
+    g: constrain(base[1] + random(-20, 20), 0, 255),
+    b: constrain(base[2] + random(-20, 20), 0, 255)
   };
 }
 
 //////////////////////////////////////////////////////
-// SPAWN AURA
+// SPAWN AURA — radialer schleier von der mitte
 //////////////////////////////////////////////////////
 
 function spawnAura(intensity) {
 
   if (!world) return;
-  if (auras.length >= 5) auras.splice(0, 1);  // oudste verwijderen
+  if (auras.length >= 4) auras.splice(0, 1);
 
-  let col     = pickAuraColor();
-  let offsets = Array.from({length: 8}, () => random(0.6, 1.4));
+  let col = pickAuraColor();
 
   auras.push({
-    x:          random(width  * 0.15, width  * 0.85),
-    y:          random(height * 0.15, height * 0.85),
-    size:       world.auraSize * random(1.4, 2.2),
+    // startet immer in der mitte
+    x:          width  * 0.5 + random(-50, 50),
+    y:          height * 0.5 + random(-50, 50),
+    maxRadius:  world.auraSize * random(0.5, 0.85),
+    radius:     0,
     r: col.r, g: col.g, b: col.b,
-    alpha:       0,
-    targetAlpha: 65 + intensity * 40,
-    offsets:     offsets,
-    blobSeed:    random(1000),
-    noiseSeedX:  random(1000),
-    noiseSeedY:  random(1000),
-    phase:       random(TWO_PI)
+    alpha:      0,
+    targetAlpha: 90 + intensity * 50,
+    speed:      random(0.4, 0.9),   // ausbreitungsgeschwindigkeit
+    seed:       random(1000)
   });
 }
 
 //////////////////////////////////////////////////////
-// PLAY ONE NOTE  (gedeelde reverb, geen nieuwe objecten)
+// PLAY NOTE
 //////////////////////////////////////////////////////
 
 function playNote(freq, intensity, release) {
 
   if (!world || !sharedReverb) return;
-
-  // max gleichzeitige oscillatoren begrenzen
   if (activeOscCount >= MAX_OSC) return;
 
   let now = millis();
-  if (now - lastSoundTime < 100) return;
+  if (now - lastSoundTime < 60) return;
   lastSoundTime = now;
 
   activeOscCount++;
@@ -394,18 +413,18 @@ function playNote(freq, intensity, release) {
   let osc    = new p5.Oscillator(world.oscType);
   let filter = new p5.LowPass();
 
-  filter.freq(world.filterFreq + random(-200, 200));
+  filter.freq(world.filterFreq + random(-150, 150));
   osc.disconnect();
   osc.connect(filter);
-  sharedReverb.process(filter, world.reverbTime * 0.5, 2);
+  sharedReverb.process(filter, world.reverbTime, 2);
 
   osc.start();
-  osc.freq(freq * random(world.detune, world.detune + 0.015));
+  osc.freq(freq * random(world.detune, world.detune + 0.01));
   osc.amp(0);
-  osc.amp(0.08 * intensity, 0.12);  // längerer attack verhindert knacken
-  osc.amp(0, release || 1.5);
+  osc.amp(0.07 * intensity, world.attack);
+  osc.amp(0, release || world.release);
 
-  let stopTime = ((release || 1.5) + 1) * 1000;
+  let stopTime = ((release || world.release) + world.attack + 0.5) * 1000;
 
   setTimeout(function() {
     try {
@@ -425,17 +444,11 @@ function playWorldChord(freqs, intensity) {
 
   if (!world) return;
   intensity = intensity || 1;
-
   spawnAura(intensity);
 
   for (let i = 0; i < freqs.length; i++) {
-
-    let freq = freqs[i] * random(world.detune, world.detune + 0.02);
-
-    if (random() < world.harmonicChance) {
-      freq *= random([0.5, 1, 1.5, 2]);
-    }
-
+    let freq = freqs[i];
+    if (random() < world.harmonicChance) freq *= random([0.5, 2]);
     playNote(freq, intensity, world.release);
   }
 }
@@ -445,96 +458,55 @@ function playWorldChord(freqs, intensity) {
 //////////////////////////////////////////////////////
 
 function playBrightnessChord() {
-  playWorldChord(random(brightnessChords), 1);
+  if (!world) return;
+  playWorldChord(world.scale, 1);
 }
 
 //////////////////////////////////////////////////////
-// ARPEGGIO  (max 4 noten om overbelasting te voorkomen)
+// ARPEGGIO
 //////////////////////////////////////////////////////
 
 function playArpeggio(notes, intensity, stepMs) {
 
   if (!world) return;
 
-  // step variiert je nach world für unterschiedliches feeling
-  let worldStep = {
-    dream:  220,   // langsam, schwebend
-    forest: 160,   // mittel, organisch
-    warm:   90,    // schnell, lebendig
-    glass:  180    // mittel-lang, kristallin
-  };
-
-  let step    = stepMs || worldStep[world.mood] || 160;
-  let limited = notes.slice(0, 4);  // max 4 noten
+  let step    = stepMs || world.step || 160;
+  let limited = notes.slice(0, 4);
 
   for (let i = 0; i < limited.length; i++) {
-
-    let freq = limited[i];
-
     (function(f, delay) {
       setTimeout(function() {
         if (!world) return;
-        playNote(f, intensity || 1, 1.2);
+        playNote(f, intensity || 1, world.release * 0.6);
       }, delay);
-    })(freq, i * step);
+    })(limited[i], i * step);
   }
 
   spawnAura(intensity);
 }
 
-//////////////////////////////////////////////////////
-// RISING / FALLING / SCATTER
-//////////////////////////////////////////////////////
-
 function playRising(baseNotes, intensity) {
-
-  // strikt aufsteigend sortiert
-  let notes = [
-    ...baseNotes,
-    ...baseNotes.map(n => n * 2)
-  ].sort((a, b) => a - b);  // low → high
-
-  playArpeggio(notes, intensity, 110);
+  let notes = [...baseNotes, ...baseNotes.map(n => n * 2)]
+    .sort((a, b) => a - b);
+  playArpeggio(notes, intensity);
 }
 
 function playFalling(baseNotes, intensity) {
-
-  // strikt absteigend sortiert
-  let notes = [
-    ...baseNotes.map(n => n * 2),
-    ...baseNotes
-  ].sort((a, b) => b - a);  // high → low
-
-  playArpeggio(notes, intensity, 120);
+  let notes = [...baseNotes.map(n => n * 2), ...baseNotes]
+    .sort((a, b) => b - a);
+  playArpeggio(notes, intensity);
 }
 
-//////////////////////////////////////////////////////
-// HARMONIC VARIATION (für Kopf rechts)
-//////////////////////////////////////////////////////
-
 function playHarmonic(baseNotes, intensity) {
-
-  // Quinten und Terzen — klingt anders als rising/falling
   let notes = baseNotes.map(n => n * random([1, 1.25, 1.5, 0.75]));
-  notes = notes.sort(() => random() - 0.5);  // leicht zufällig
-
-  playArpeggio(notes, intensity, 150);
+  playArpeggio(notes, intensity);
 }
 
 function playScatter(baseNotes, intensity) {
-
-  let pool = [
-    ...baseNotes,
-    ...baseNotes.map(n => n * 2),
-    ...baseNotes.map(n => n * 0.5)
-  ];
-
+  let pool   = [...baseNotes, ...baseNotes.map(n => n * 2), ...baseNotes.map(n => n * 0.5)];
   let picked = [];
-  for (let i = 0; i < 4; i++) {
-    picked.push(random(pool));
-  }
-
-  playArpeggio(picked, intensity, 90);
+  for (let i = 0; i < 4; i++) picked.push(random(pool));
+  playArpeggio(picked, intensity);
 }
 
 //////////////////////////////////////////////////////
@@ -545,17 +517,11 @@ function detectMouth(face) {
 
   let upperLip = face.scaledMesh[13];
   let lowerLip = face.scaledMesh[14];
-
-  let d = dist(upperLip[0], upperLip[1], lowerLip[0], lowerLip[1]);
+  let d        = dist(upperLip[0], upperLip[1], lowerLip[0], lowerLip[1]);
   let mouthOpen = d > 15;
 
-  if (mouthOpen && !mouthWasOpen) {
-    playScatter(world.scale, 1.3);
-  }
-
-  if (mouthOpen && frameCount % 90 === 0) {
-    playNote(random(world.scale) * random([1, 2]), 0.6, 1.0);
-  }
+  if (mouthOpen && !mouthWasOpen) playScatter(world.scale, 1.3);
+  if (mouthOpen && frameCount % 90 === 0) playNote(random(world.scale) * random([1, 2]), 0.6, world.release * 0.5);
 
   mouthWasOpen = mouthOpen;
 }
@@ -566,15 +532,12 @@ function detectMouth(face) {
 
 function detectSmile(face) {
 
-  let left  = face.scaledMesh[61];
-  let right = face.scaledMesh[291];
-
+  let left    = face.scaledMesh[61];
+  let right   = face.scaledMesh[291];
   let w       = dist(left[0], left[1], right[0], right[1]);
   let smiling = w > 80;
 
-  if (smiling && !smileWasActive) {
-    playRising(world.scale, 1.1);  // aufsteigendes Arpeggio
-  }
+  if (smiling && !smileWasActive) playRising(world.scale, 1.1);
 
   smileWasActive = smiling;
 }
@@ -590,16 +553,13 @@ function detectEyesClosed(face) {
   let rightTop    = face.scaledMesh[386];
   let rightBottom = face.scaledMesh[374];
 
-  let leftEyeOpen  = dist(leftTop[0],  leftTop[1],  leftBottom[0],  leftBottom[1]);
-  let rightEyeOpen = dist(rightTop[0], rightTop[1], rightBottom[0], rightBottom[1]);
+  let leftOpen  = dist(leftTop[0],  leftTop[1],  leftBottom[0],  leftBottom[1]);
+  let rightOpen = dist(rightTop[0], rightTop[1], rightBottom[0], rightBottom[1]);
+  let closed    = leftOpen < 10 && rightOpen < 10;
 
-  let eyesClosed = leftEyeOpen < 10 && rightEyeOpen < 10;
+  if (closed && !eyesWereClosed) playFalling(world.scale, 1.2);
 
-  if (eyesClosed && !eyesWereClosed) {
-    playFalling(world.scale, 1.2);
-  }
-
-  eyesWereClosed = eyesClosed;
+  eyesWereClosed = closed;
 }
 
 //////////////////////////////////////////////////////
@@ -613,17 +573,11 @@ function detectHeadTilt(face) {
   let eyeDiff  = leftEye[1] - rightEye[1];
 
   let tiltedRight = eyeDiff > 15;
-  if (tiltedRight && !headRightActive) {
-    playHarmonic(world.scale, 1.0);  // harmonische Variation
-    spawnAura(0.8);
-  }
+  if (tiltedRight && !headRightActive) { playHarmonic(world.scale, 1.0); spawnAura(0.8); }
   headRightActive = tiltedRight;
 
   let tiltedLeft = eyeDiff < -15;
-  if (tiltedLeft && !headLeftActive) {
-    playFalling(world.scale, 1.1);  // absteigendes Arpeggio
-    spawnAura(0.8);
-  }
+  if (tiltedLeft && !headLeftActive) { playFalling(world.scale, 1.1); spawnAura(0.8); }
   headLeftActive = tiltedLeft;
 }
 
@@ -635,13 +589,10 @@ function detectFrown(face) {
 
   let leftBrow  = face.scaledMesh[107];
   let rightBrow = face.scaledMesh[336];
+  let browDist  = dist(leftBrow[0], leftBrow[1], rightBrow[0], rightBrow[1]);
+  let frowning  = browDist < 180;
 
-  let browDistance = dist(leftBrow[0], leftBrow[1], rightBrow[0], rightBrow[1]);
-  let frowning     = browDistance < 180;
-
-  if (frowning && !frownActive) {
-    playScatter(world.scale.map(n => n * 0.5), 1.2);
-  }
+  if (frowning && !frownActive) playScatter(world.scale.map(n => n * 0.5), 1.2);
 
   frownActive = frowning;
 }
@@ -652,17 +603,14 @@ function detectFrown(face) {
 
 function detectLookingUp(face) {
 
-  let nose = face.scaledMesh[1];
-  let chin = face.scaledMesh[152];
+  let nose   = face.scaledMesh[1];
+  let chin   = face.scaledMesh[152];
+  let vDist  = dist(nose[0], nose[1], chin[0], chin[1]);
+  let lookUp = vDist < 140;
 
-  let verticalDistance = dist(nose[0], nose[1], chin[0], chin[1]);
-  let lookingUp        = verticalDistance < 140;
+  if (lookUp && !lookingUpActive) playRising(world.scale.map(n => n * 1.5), 1.0);
 
-  if (lookingUp && !lookingUpActive) {
-    playRising(world.scale.map(n => n * 1.5), 1.0);
-  }
-
-  lookingUpActive = lookingUp;
+  lookingUpActive = lookUp;
 }
 
 //////////////////////////////////////////////////////
@@ -707,11 +655,9 @@ function updateBlur() {
   let rightEye = face.scaledMesh[263];
 
   let eyeDistance = dist(leftEye[0], leftEye[1], rightEye[0], rightEye[1]);
+  let normalized  = constrain(map(eyeDistance, 30, 80, 0, 1), 0, 1);
 
-  let normalized = constrain(map(eyeDistance, 30, 80, 0, 1), 0, 1);
-
-  let targetBlur = (1 - normalized) * 20;
-  blurAmount = lerp(blurAmount, targetBlur, 0.06);
+  blurAmount = lerp(blurAmount, (1 - normalized) * 20, 0.06);
 
   if (normalized > 0.88) {
     blurAmount        = 0;
@@ -768,7 +714,7 @@ function drawGlassText(alpha) {
 }
 
 //////////////////////////////////////////////////////
-// AURAS
+// DRAW AURAS — radiale schwaden von der mitte
 //////////////////////////////////////////////////////
 
 function drawAuras() {
@@ -779,70 +725,41 @@ function drawAuras() {
 
     let a = auras[i];
 
-    // fade in / out
+    // radius wächst nach außen
+    a.radius += a.speed;
+
+    // alpha: einblenden dann ausblenden
     if (a.alpha < a.targetAlpha) {
-      a.alpha = min(a.targetAlpha, a.alpha + 1.5);
+      a.alpha += 2;
     } else {
-      a.alpha       *= 0.988;
-      a.targetAlpha *= 0.988;
+      a.alpha       *= 0.985;
+      a.targetAlpha *= 0.985;
     }
 
-    // vereenvoudigd: 6 lagen i.p.v. 10, 4 blobs i.p.v. 6
-    let layers = 6;
+    // weiche schichten: innen hell, außen transparent
+    let rings = 6;
+    for (let r = rings; r >= 1; r--) {
 
-    for (let l = layers; l >= 1; l--) {
+      let t         = r / rings;
+      let ringR     = a.radius * t;
+      // kern hell, rand transparent
+      let ringAlpha = a.alpha * (1 - t + 0.1) * 1.2;
 
-      let t          = l / layers;
-      let layerSize  = a.size * t;
-      let layerAlpha = a.alpha * (1 - t) * 0.26;
-      let noiseScale = 0.003;
-      let warpAmt    = layerSize * 0.25 * (1 - t * 0.5);
-      let numBlobs   = 6;
+      let nVal   = noise(a.seed + r * 0.4 + frameCount * 0.002);
+      let wobble = map(nVal, 0, 1, 0.88, 1.12);
 
-      for (let b = 0; b < numBlobs; b++) {
-
-        let angle = (TWO_PI / numBlobs) * b + a.phase;
-
-        let nVal = noise(
-          cos(angle) * noiseScale * a.size + a.blobSeed,
-          sin(angle) * noiseScale * a.size + a.blobSeed + floor(frameCount * 0.0005),
-          l * 0.1
-        );
-
-        let offset = warpAmt * (nVal - 0.5) * 2;
-        let bx     = a.x + cos(angle) * offset;
-        let by     = a.y + sin(angle) * offset;
-
-        fill(a.r, a.g, a.b, layerAlpha);
-
-        push();
-        translate(bx, by);
-        scale(
-          a.offsets[b % a.offsets.length],
-          a.offsets[(b + 2) % a.offsets.length]
-        );
-        ellipse(0, 0, layerSize);
-        pop();
-      }
-
-      // zachte kern
-      fill(a.r, a.g, a.b, layerAlpha * 1.4);
-      ellipse(a.x, a.y, layerSize * 0.6);
+      fill(a.r, a.g, a.b, ringAlpha);
+      ellipse(a.x, a.y, ringR * 2 * wobble, ringR * 2 / wobble);
     }
 
-    // drift
-    let t      = frameCount * 0.0004;
-    let driftX = (noise(a.noiseSeedX, t)       - 0.5) * 1.2;
-    let driftY = (noise(a.noiseSeedY, t + 100) - 0.5) * 1.2;
+    // heller kern
+    fill(a.r, a.g, a.b, a.alpha * 0.6);
+    ellipse(a.x, a.y, a.radius * 0.3, a.radius * 0.3);
 
-    a.x    += driftX;
-    a.y    += driftY;
-    a.phase += 0.0015;
-
-    a.x = ((a.x % width)  + width)  % width;
-    a.y = ((a.y % height) + height) % height;
-
-    if (a.alpha < 0.8) auras.splice(i, 1);
+    // remove wenn zu groß oder zu transparent
+    if (a.radius > a.maxRadius || a.alpha < 0.5) {
+      auras.splice(i, 1);
+    }
   }
 }
 
@@ -861,7 +778,7 @@ function drawDebug() {
 
   if (world) {
     text("WORLD: " + world.mood, 20, 100);
-    // SEED wird nicht angezeigt
+    // seed unsichtbar
   }
 }
 

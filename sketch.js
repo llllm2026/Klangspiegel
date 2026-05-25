@@ -73,8 +73,10 @@ let comeCloserAlpha = 0;
 // AUDIO
 //////////////////////////////////////////////////////
 
-let audioStarted  = false;
-let lastSoundTime = 0;   // cooldown gegen Audio-Overload
+let audioStarted   = false;
+let lastSoundTime  = 0;
+let activeOscCount = 0;
+let MAX_OSC        = 4;   // max gleichzeitige oscillatoren
 
 //////////////////////////////////////////////////////
 // SHARED REVERB (1x aanmaken, niet elke noot)
@@ -207,18 +209,64 @@ function createWorld() {
   let seed = floor(random(100000));
   randomSeed(seed);
 
+  // jede world hat jetzt klar unterschiedliche klangparameter
+  let worldParams = {
+
+    dream: {
+      oscType:       "triangle",
+      attack:        random(1.2, 2.5),   // sehr langsam, traumhaft
+      release:       random(6, 10),
+      harmonicChance: random(0.6, 0.9),  // viele harmonische sprünge
+      filterFreq:    palette.filter,
+      reverbTime:    palette.reverb,
+      detune:        random(0.992, 1.008)
+    },
+
+    forest: {
+      oscType:       "triangle",
+      attack:        random(0.6, 1.4),   // mittel, organisch
+      release:       random(4, 7),
+      harmonicChance: random(0.3, 0.6),
+      filterFreq:    palette.filter,
+      reverbTime:    palette.reverb,
+      detune:        random(0.988, 1.012)
+    },
+
+    warm: {
+      oscType:       "sine",
+      attack:        random(0.2, 0.6),   // schnell, direkt
+      release:       random(2, 4),
+      harmonicChance: random(0.1, 0.3),  // wenig sprünge, melodischer
+      filterFreq:    palette.filter,
+      reverbTime:    palette.reverb,
+      detune:        random(0.995, 1.005)
+    },
+
+    glass: {
+      oscType:       "sine",
+      attack:        random(0.8, 1.8),   // lang, kristallin
+      release:       random(5, 9),
+      harmonicChance: random(0.4, 0.7),
+      filterFreq:    palette.filter,
+      reverbTime:    palette.reverb,
+      detune:        random(0.990, 1.010)
+    }
+  };
+
+  let wp = worldParams[palette.name] || worldParams.glass;
+
   world = {
-    mood:          palette.name,
-    seed:          seed,
-    scale:         random(brightnessChords),
-    oscType:       palette.osc,
-    reverbTime:    palette.reverb,
-    filterFreq:    palette.filter,
-    detune:        random(0.985, 1.015),
-    attack:        random(0.3, 1.2),
-    release:       random(3, 6),
-    harmonicChance: random(0.2, 0.7),
-    auraSize:      random(700, 1600)
+    mood:           palette.name,
+    seed:           seed,
+    scale:          random(brightnessChords),
+    oscType:        wp.oscType,
+    reverbTime:     wp.reverbTime,
+    filterFreq:     wp.filterFreq,
+    detune:         wp.detune,
+    attack:         wp.attack,
+    release:        wp.release,
+    harmonicChance: wp.harmonicChance,
+    auraSize:       random(700, 1600)
   };
 
   // gedeelde reverb aanmaken voor deze world
@@ -334,10 +382,14 @@ function playNote(freq, intensity, release) {
 
   if (!world || !sharedReverb) return;
 
-  // min 80ms zwischen noten — verhindert Audio-Overload auf iPad
+  // max gleichzeitige oscillatoren begrenzen
+  if (activeOscCount >= MAX_OSC) return;
+
   let now = millis();
-  if (now - lastSoundTime < 80) return;
+  if (now - lastSoundTime < 100) return;
   lastSoundTime = now;
+
+  activeOscCount++;
 
   let osc    = new p5.Oscillator(world.oscType);
   let filter = new p5.LowPass();
@@ -361,6 +413,7 @@ function playNote(freq, intensity, release) {
       osc.disconnect();
       filter.disconnect();
     } catch(e) {}
+    activeOscCount = max(0, activeOscCount - 1);
   }, stopTime);
 }
 
@@ -403,7 +456,15 @@ function playArpeggio(notes, intensity, stepMs) {
 
   if (!world) return;
 
-  let step    = stepMs || 160;
+  // step variiert je nach world für unterschiedliches feeling
+  let worldStep = {
+    dream:  220,   // langsam, schwebend
+    forest: 160,   // mittel, organisch
+    warm:   90,    // schnell, lebendig
+    glass:  180    // mittel-lang, kristallin
+  };
+
+  let step    = stepMs || worldStep[world.mood] || 160;
   let limited = notes.slice(0, 4);  // max 4 noten
 
   for (let i = 0; i < limited.length; i++) {
